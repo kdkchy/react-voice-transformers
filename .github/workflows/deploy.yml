@@ -1,0 +1,57 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 22
+
+      - name: Restore Whisper Model Cache
+        uses: actions/cache@v4
+        with:
+          path: public/models/Xenova/whisper-base
+          key: whisper-base-v1
+
+      - name: Install git-lfs
+        run: |
+          sudo apt-get update
+          sudo apt-get install git-lfs
+          git lfs install
+
+      - name: Download model if missing
+        run: |
+          if [ ! -d "public/models/Xenova/whisper-base/.git" ]; then
+            mkdir -p public/models/Xenova
+            git clone https://huggingface.co/Xenova/whisper-base public/models/Xenova/whisper-base
+          fi
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Custom script
+        run: npm run prepare:wasm
+
+      - name: Build
+        run: npm run build
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        run: |
+          rsync -avz --delete --checksum ./dist/ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.DEPLOY_PATH }}
